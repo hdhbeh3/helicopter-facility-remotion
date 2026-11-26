@@ -1,4 +1,5 @@
-name: Helicopter Render - Diagnostic Preview
+
+name: Helicopter Render - ID Fix Preview
 
 on:
   workflow_dispatch:
@@ -23,38 +24,47 @@ jobs:
       - name: Install system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y \
-            unzip ffmpeg libnss3 libatk1.0-0 \
-            libatk-bridge2.0-0 libcups2 libdrm2 \
-            libxkbcommon0 libxcomposite1 libxdamage1 \
-            libxfixes3 libxrandr2 libgbm1 libasound2t64
+          sudo apt-get install -y unzip ffmpeg libnss3 libatk1.0-0 \
+            libatk-bridge2.0-0 libcups2 libdrm2 libxkbcommon0 \
+            libxcomposite1 libxdamage1 libxfixes3 libxrandr2 \
+            libgbm1 libasound2t64
 
       - name: Extract project
         run: |
-          mkdir -p extracted/heli
+          mkdir -p extracted
           unzip -q helicopter-facility-project.zip -d extracted
           test -f extracted/heli/src/Root.tsx
-          echo "Project extracted successfully."
 
-      - name: Inspect composition ID
+      - name: Force simple composition ID
         working-directory: extracted/heli
         run: |
           python3 - <<'PY'
           from pathlib import Path
+          import re
 
           path = Path("src/Root.tsx")
           source = path.read_text()
 
-          print("===== ROOT.TSX =====")
-          print(repr(source))
+          pattern = r'(\bid\s*=\s*)["\'][^"\']*["\']'
+          updated, count = re.subn(
+              pattern,
+              r'\1"helicopter-facility"',
+              source,
+              count=1
+          )
 
-          print("===== COMPOSITION LINES =====")
-          for line in source.splitlines():
-              if "Composition" in line or "id=" in line:
-                  print(repr(line))
+          if count != 1:
+              print("Could not find a quoted composition ID.")
+              print(repr(source))
+              raise SystemExit(1)
+
+          path.write_text(updated)
+
+          print("Updated Root.tsx:")
+          print(path.read_text())
           PY
 
-      - name: Install project dependencies
+      - name: Install dependencies
         working-directory: extracted/heli
         run: |
           if [ -f package-lock.json ]; then
@@ -63,19 +73,19 @@ jobs:
             npm install
           fi
 
-      - name: Ensure Remotion browser
+      - name: Ensure browser
         working-directory: extracted/heli
         run: npx remotion browser ensure
 
-      - name: List compositions
+      - name: Verify composition
         working-directory: extracted/heli
         run: npx remotion compositions src/index.ts
 
-      - name: Render 3-second test
+      - name: Render 3-second preview
         working-directory: extracted/heli
         run: |
           mkdir -p out
-          npx remotion render src/index.ts "Helicopter Facility" \
+          npx remotion render src/index.ts helicopter-facility \
             out/preview-test.mp4 \
             --scale=0.5 \
             --crf=26 \
@@ -94,7 +104,7 @@ jobs:
       - name: Upload preview
         uses: actions/upload-artifact@v4
         with:
-          name: helicopter-3-second-test
+          name: helicopter-3-second-preview
           path: extracted/heli/out/preview-test.mp4
           if-no-files-found: error
           retention-days: 7
