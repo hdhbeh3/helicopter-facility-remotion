@@ -1,4 +1,4 @@
-name: Helicopter Render - Performance Test
+name: Helicopter Render - Diagnostic Preview
 
 on:
   workflow_dispatch:
@@ -31,11 +31,12 @@ jobs:
 
       - name: Extract project
         run: |
-          mkdir -p extracted
+          mkdir -p extracted/heli
           unzip -q helicopter-facility-project.zip -d extracted
           test -f extracted/heli/src/Root.tsx
+          echo "Project extracted successfully."
 
-      - name: Fix composition ID
+      - name: Inspect composition ID
         working-directory: extracted/heli
         run: |
           python3 - <<'PY'
@@ -44,20 +45,13 @@ jobs:
           path = Path("src/Root.tsx")
           source = path.read_text()
 
-          old = 'id="Helicopter Facility"'
-          new = 'id="helicopter-facility"'
+          print("===== ROOT.TSX =====")
+          print(repr(source))
 
-          if old not in source:
-              raise SystemExit("Expected composition ID was not found.")
-
-          source = source.replace(old, new)
-          path.write_text(source)
-
-          if new not in path.read_text():
-              raise SystemExit("Composition ID replacement failed.")
-
-          print("Composition ID successfully changed.")
-          print(path.read_text())
+          print("===== COMPOSITION LINES =====")
+          for line in source.splitlines():
+              if "Composition" in line or "id=" in line:
+                  print(repr(line))
           PY
 
       - name: Install project dependencies
@@ -73,7 +67,7 @@ jobs:
         working-directory: extracted/heli
         run: npx remotion browser ensure
 
-      - name: Verify composition
+      - name: List compositions
         working-directory: extracted/heli
         run: npx remotion compositions src/index.ts
 
@@ -81,7 +75,7 @@ jobs:
         working-directory: extracted/heli
         run: |
           mkdir -p out
-          npx remotion render src/index.ts helicopter-facility \
+          npx remotion render src/index.ts "Helicopter Facility" \
             out/preview-test.mp4 \
             --scale=0.5 \
             --crf=26 \
