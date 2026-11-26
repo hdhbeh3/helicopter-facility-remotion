@@ -1,0 +1,97 @@
+
+name: Render Helicopter Facility Video
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  render:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y unzip ffmpeg libnss3 libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 libgbm1 libasound2
+
+      - name: Extract project ZIP
+        run: |
+          mkdir -p extracted
+          unzip -q helicopter-facility-project.zip -d extracted
+          echo "ZIP extracted successfully"
+          find extracted -maxdepth 4 -type f | head -200
+
+      - name: Locate Remotion project
+        id: project
+        run: |
+          PROJECT_DIR=""
+
+          while IFS= read -r file; do
+            DIR="$(dirname "$file")"
+
+            if node -e "const p=require('./$file'); process.exit(p.scripts?.render ? 0 : 1)" 2>/dev/null; then
+              PROJECT_DIR="$DIR"
+              break
+            fi
+          done < <(find extracted -name package.json -not -path '*/node_modules/*' -print)
+
+          if [ -z "$PROJECT_DIR" ]; then
+            echo "::error::No package.json with a render script found."
+            exit 1
+          fi
+
+          echo "project_dir=$PROJECT_DIR" >> "$GITHUB_OUTPUT"
+          echo "Project found: $PROJECT_DIR"
+
+      - name: Install project dependencies
+        working-directory: ${{ steps.project.outputs.project_dir }}
+        run: |
+          if [ -f package-lock.json ]; then
+            npm ci
+          else
+            npm install
+          fi
+
+      - name: Ensure Remotion browser
+        working-directory: ${{ steps.project.outputs.project_dir }}
+        run: npx remotion browser ensure
+
+      - name: Render FULL video
+        working-directory: ${{ steps.project.outputs.project_dir }}
+        run: npm run render
+
+      - name: Find rendered MP4
+        working-directory: ${{ steps.project.outputs.project_dir }}
+        run: |
+          VIDEO="$(find . -type f -name '*.mp4' -not -path '*/node_modules/*' | head -1)"
+
+          if [ -z "$VIDEO" ]; then
+            echo "::error::No MP4 video was generated."
+            exit 1
+          fi
+
+          mkdir -p "$GITHUB_WORKSPACE/rendered"
+          cp "$VIDEO" "$GITHUB_WORKSPACE/rendered/helicopter-facility.mp4"
+
+          ffprobe -v error -show_entries format=duration,size -of default=noprint_wrappers=1 "$GITHUB_WORKSPACE/rendered/helicopter-facility.mp4"
+
+      - name: Upload FULL video
+        uses: actions/upload-artifact@v4
+        with:
+          name: helicopter-facility-full-video
+          path: rendered/helicopter-facility.mp4
+          if-no-files-found: error
+          retention-days: 7
+          
