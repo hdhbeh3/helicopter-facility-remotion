@@ -1,5 +1,4 @@
-
-name: Helicopter Render - ID Fix Preview
+name: Helicopter Render - Preview
 
 on:
   workflow_dispatch:
@@ -24,45 +23,17 @@ jobs:
       - name: Install system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y unzip ffmpeg libnss3 libatk1.0-0 \
-            libatk-bridge2.0-0 libcups2 libdrm2 libxkbcommon0 \
-            libxcomposite1 libxdamage1 libxfixes3 libxrandr2 \
-            libgbm1 libasound2t64
+          sudo apt-get install -y \
+            unzip ffmpeg libnss3 libatk1.0-0 \
+            libatk-bridge2.0-0 libcups2 libdrm2 \
+            libxkbcommon0 libxcomposite1 libxdamage1 \
+            libxfixes3 libxrandr2 libgbm1 libasound2t64
 
       - name: Extract project
         run: |
           mkdir -p extracted
           unzip -q helicopter-facility-project.zip -d extracted
           test -f extracted/heli/src/Root.tsx
-
-      - name: Force simple composition ID
-        working-directory: extracted/heli
-        run: |
-          python3 - <<'PY'
-          from pathlib import Path
-          import re
-
-          path = Path("src/Root.tsx")
-          source = path.read_text()
-
-          pattern = r'(\bid\s*=\s*)["\'][^"\']*["\']'
-          updated, count = re.subn(
-              pattern,
-              r'\1"helicopter-facility"',
-              source,
-              count=1
-          )
-
-          if count != 1:
-              print("Could not find a quoted composition ID.")
-              print(repr(source))
-              raise SystemExit(1)
-
-          path.write_text(updated)
-
-          print("Updated Root.tsx:")
-          print(path.read_text())
-          PY
 
       - name: Install dependencies
         working-directory: extracted/heli
@@ -73,19 +44,20 @@ jobs:
             npm install
           fi
 
-      - name: Ensure browser
+      - name: Ensure Remotion browser
         working-directory: extracted/heli
         run: npx remotion browser ensure
 
       - name: Verify composition
         working-directory: extracted/heli
-        run: npx remotion compositions src/index.ts
+        run: |
+          npx remotion compositions src/index.ts
 
-      - name: Render 3-second preview
+      - name: Render 3-second test
         working-directory: extracted/heli
         run: |
           mkdir -p out
-          npx remotion render src/index.ts helicopter-facility \
+          npx remotion render src/index.ts HelicopterFacility \
             out/preview-test.mp4 \
             --scale=0.5 \
             --crf=26 \
