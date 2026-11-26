@@ -33,7 +33,11 @@ jobs:
         run: |
           mkdir -p extracted
           unzip -q helicopter-facility-project.zip -d extracted
-          test -f extracted/heli/package.json
+
+          if [ ! -f extracted/heli/package.json ]; then
+            echo "::error::Project package.json not found."
+            exit 1
+          fi
 
       - name: Install project dependencies
         working-directory: extracted/heli
@@ -48,10 +52,20 @@ jobs:
         working-directory: extracted/heli
         run: npx remotion browser ensure
 
+      - name: Diagnose composition ID
+        working-directory: extracted/heli
+        run: |
+          echo "===== ROOT.TSX ====="
+          cat src/Root.tsx
+
+          echo "===== AVAILABLE COMPOSITIONS ====="
+          npx remotion compositions src/index.ts
+
       - name: Render 3-second test
         working-directory: extracted/heli
         run: |
           mkdir -p out
+
           npx remotion render src/index.ts "Helicopter Facility" \
             out/preview-test.mp4 \
             --scale=0.5 \
