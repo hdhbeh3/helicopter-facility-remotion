@@ -34,17 +34,31 @@ jobs:
           mkdir -p extracted
           unzip -q helicopter-facility-project.zip -d extracted
           test -f extracted/heli/src/Root.tsx
-          test -f extracted/heli/package.json
 
       - name: Fix composition ID
         working-directory: extracted/heli
         run: |
-          sed -i 's/id="Helicopter Facility"/id="helicopter-facility"/' src/Root.tsx
+          python3 - <<'PY'
+          from pathlib import Path
 
-          echo "===== UPDATED ROOT.TSX ====="
-          cat src/Root.tsx
+          path = Path("src/Root.tsx")
+          source = path.read_text()
 
-          grep -q 'id="helicopter-facility"' src/Root.tsx
+          old = 'id="Helicopter Facility"'
+          new = 'id="helicopter-facility"'
+
+          if old not in source:
+              raise SystemExit("Expected composition ID was not found.")
+
+          source = source.replace(old, new)
+          path.write_text(source)
+
+          if new not in path.read_text():
+              raise SystemExit("Composition ID replacement failed.")
+
+          print("Composition ID successfully changed.")
+          print(path.read_text())
+          PY
 
       - name: Install project dependencies
         working-directory: extracted/heli
@@ -61,14 +75,12 @@ jobs:
 
       - name: Verify composition
         working-directory: extracted/heli
-        run: |
-          npx remotion compositions src/index.ts
+        run: npx remotion compositions src/index.ts
 
       - name: Render 3-second test
         working-directory: extracted/heli
         run: |
           mkdir -p out
-
           npx remotion render src/index.ts helicopter-facility \
             out/preview-test.mp4 \
             --scale=0.5 \
