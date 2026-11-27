@@ -62,7 +62,6 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: npm
 
       - name: Install system dependencies
         run: |
@@ -129,7 +128,6 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: npm
 
       - name: Install Chrome system libraries
         run: |
@@ -187,7 +185,6 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: npm
 
       - name: Install Chrome system libraries
         run: |
@@ -331,7 +328,6 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: npm
 
       - name: Install Chrome system libraries
         run: |
