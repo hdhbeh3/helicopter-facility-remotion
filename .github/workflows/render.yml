@@ -1,0 +1,374 @@
+
+name: Render Helicopter Facility Short
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "Render mode"
+        required: true
+        type: choice
+        options:
+          - benchmark
+          - parallel
+          - single
+        default: benchmark
+      chunks:
+        description: "Number of parallel chunks"
+        required: true
+        type: choice
+        options:
+          - "4"
+          - "8"
+          - "12"
+        default: "8"
+      quality:
+        description: "Render quality"
+        required: true
+        type: choice
+        options:
+          - full
+          - preview
+        default: full
+      aa:
+        description: "Enable anti-aliasing (slower)"
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+env:
+  CHROME_LIBS: >-
+    ffmpeg libnss3 libdbus-1-3 libatk1.0-0
+    libatk-bridge2.0-0 libgbm1 libasound2t64
+    libxrandr2 libxkbcommon0 libxfixes3
+    libxcomposite1 libxdamage1 libcups2
+    libpango-1.0-0 libcairo2
+
+jobs:
+  prepare:
+    name: Prepare and validate project
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
+      total_frames: ${{ steps.matrix.outputs.total_frames }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+
+      - name: Install project dependencies
+        run: npm install
+
+      - name: Run project checks
+        run: npm run check
+
+      - name: TypeScript check
+        continue-on-error: true
+        run: npm run typecheck
+
+      - name: Create render chunk matrix
+        id: matrix
+        env:
+          CHUNK_COUNT: ${{ inputs.chunks }}
+        run: |
+          node <<'NODE'
+          const fs = require('fs');
+          const duration = require('./src/audioTimeline.json').duration;
+          const fps = 30;
+          const total = Math.ceil((duration + 0.4) * fps);
+          const count = Number(process.env.CHUNK_COUNT);
+          const include = [];
+
+          for (let i = 0; i < count; i++) {
+            const start = Math.floor(i * total / count);
+            const end = Math.floor((i + 1) * total / count) - 1;
+            include.push({
+              id: String(i + 1).padStart(2, '0'),
+              start,
+              end
+            });
+          }
+
+          fs.appendFileSync(
+            process.env.GITHUB_OUTPUT,
+            `matrix=${JSON.stringify({include})}\n`
+          );
+          fs.appendFileSync(
+            process.env.GITHUB_OUTPUT,
+            `total_frames=${total}\n`
+          );
+
+          console.log(`Total frames: ${total}`);
+          console.log(JSON.stringify(include, null, 2));
+          NODE
+
+  benchmark:
+    name: Benchmark render performance
+    needs: prepare
+    if: inputs.mode == 'benchmark'
+    runs-on: ubuntu-latest
+    timeout-minutes: 330
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install Chrome system libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y $CHROME_LIBS
+
+      - name: Install project dependencies
+        run: npm install
+
+      - name: Ensure Remotion browser
+        run: npx remotion browser ensure
+
+      - name: Run performance benchmark
+        env:
+          CONC: 2
+          EXTRA_ARGS: ${{ inputs.aa && '--props={"aa":true}' || '' }}
+        run: bash scripts/benchmark.sh
+
+      - name: Render benchmark still images
+        env:
+          AA_ARGS: ${{ inputs.aa && '--props={"aa":true}' || '' }}
+        run: |
+          mkdir -p benchmark-stills
+          for frame in 240 435 1290 1575 1900; do
+            npx remotion still src/index.ts HelicopterFacility \
+              "benchmark-stills/frame-${frame}.png" \
+              --frame="$frame" \
+              --gl=swangle \
+              --concurrency=2 \
+              $AA_ARGS
+          done
+
+      - name: Upload benchmark stills
+        uses: actions/upload-artifact@v4
+        with:
+          name: helicopter-benchmark-stills
+          path: benchmark-stills/
+          retention-days: 3
+
+  render-chunk:
+    name: Render chunk ${{ matrix.id }}
+    needs: prepare
+    if: inputs.mode == 'parallel'
+    runs-on: ubuntu-latest
+    timeout-minutes: 330
+    strategy:
+      fail-fast: false
+      max-parallel: 8
+      matrix: ${{ fromJSON(needs.prepare.outputs.matrix) }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install Chrome system libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y $CHROME_LIBS
+
+      - name: Install project dependencies
+        run: npm install
+
+      - name: Ensure Remotion browser
+        run: npx remotion browser ensure
+
+      - name: Render video chunk
+        env:
+          START_FRAME: ${{ matrix.start }}
+          END_FRAME: ${{ matrix.end }}
+          CHUNK_ID: ${{ matrix.id }}
+          AA_ARGS: ${{ inputs.aa && '--props={"aa":true}' || '' }}
+          QUALITY: ${{ inputs.quality }}
+        run: |
+          mkdir -p out
+
+          if [ "$QUALITY" = "preview" ]; then
+            SCALE_ARGS="--scale=0.5 --crf=26"
+          else
+            SCALE_ARGS="--crf=18"
+          fi
+
+          npx remotion render src/index.ts HelicopterFacility \
+            "out/chunk-${CHUNK_ID}.mp4" \
+            --frames="${START_FRAME}-${END_FRAME}" \
+            --muted \
+            --gl=swangle \
+            --concurrency=2 \
+            --log=error \
+            $SCALE_ARGS \
+            $AA_ARGS
+
+      - name: Upload rendered chunk
+        uses: actions/upload-artifact@v4
+        with:
+          name: chunk-${{ matrix.id }}
+          path: out/chunk-${{ matrix.id }}.mp4
+          retention-days: 3
+
+  merge:
+    name: Merge chunks and audio
+    needs:
+      - prepare
+      - render-chunk
+    if: inputs.mode == 'parallel'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download all rendered chunks
+        uses: actions/download-artifact@v4
+        with:
+          pattern: chunk-*
+          path: chunks
+          merge-multiple: false
+
+      - name: Verify downloaded chunks
+        run: |
+          echo "Downloaded chunk files:"
+          find chunks -type f -name '*.mp4' | sort
+          COUNT=$(find chunks -type f -name '*.mp4' | wc -l)
+          EXPECTED="${{ inputs.chunks }}"
+          if [ "$COUNT" -ne "$EXPECTED" ]; then
+            echo "Expected $EXPECTED chunks, found $COUNT"
+            exit 1
+          fi
+
+      - name: Merge video and original audio
+        env:
+          TOTAL_FRAMES: ${{ needs.prepare.outputs.total_frames }}
+          QUALITY: ${{ inputs.quality }}
+        run: |
+          mkdir -p out
+
+          find chunks -type f -name '*.mp4' | sort > chunk-files.txt
+
+          while IFS= read -r file; do
+            printf "file '%s'\n" "$file"
+          done < chunk-files.txt > concat-list.txt
+
+          if [ "$QUALITY" = "preview" ]; then
+            CRF=26
+          else
+            CRF=18
+          fi
+
+          ffmpeg -y \
+            -f concat -safe 0 -i concat-list.txt \
+            -i public/voiceover.mp3 \
+            -i public/audio/music.wav \
+            -i public/audio/sfx.wav \
+            -filter_complex \
+            "[1:a][2:a][3:a]amix=inputs=3:duration=longest:dropout_transition=0[a]" \
+            -map 0:v:0 \
+            -map "[a]" \
+            -frames:v "$TOTAL_FRAMES" \
+            -c:v libx264 \
+            -preset medium \
+            -crf "$CRF" \
+            -pix_fmt yuv420p \
+            -c:a aac \
+            -b:a 192k \
+            -shortest \
+            -movflags +faststart \
+            out/helicopter-facility-short.mp4
+
+      - name: Verify final video
+        run: |
+          ffprobe -v error \
+            -show_entries format=duration,size \
+            -show_entries stream=codec_name,width,height,r_frame_rate \
+            -of default=noprint_wrappers=1 \
+            out/helicopter-facility-short.mp4
+
+      - name: Upload final video
+        uses: actions/upload-artifact@v4
+        with:
+          name: helicopter-facility-short
+          path: out/helicopter-facility-short.mp4
+          retention-days: 7
+
+  render-single:
+    name: Render complete video in one runner
+    needs: prepare
+    if: inputs.mode == 'single'
+    runs-on: ubuntu-latest
+    timeout-minutes: 330
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install Chrome system libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y $CHROME_LIBS
+
+      - name: Install project dependencies
+        run: npm install
+
+      - name: Ensure Remotion browser
+        run: npx remotion browser ensure
+
+      - name: Render complete video
+        env:
+          AA_ARGS: ${{ inputs.aa && '--props={"aa":true}' || '' }}
+          QUALITY: ${{ inputs.quality }}
+        run: |
+          mkdir -p out
+
+          if [ "$QUALITY" = "preview" ]; then
+            SCALE_ARGS="--scale=0.5 --crf=26"
+          else
+            SCALE_ARGS="--crf=18"
+          fi
+
+          npx remotion render src/index.ts HelicopterFacility \
+            out/helicopter-facility-short.mp4 \
+            --gl=swangle \
+            --concurrency=2 \
+            $SCALE_ARGS \
+            $AA_ARGS
+
+      - name: Upload final video
+        uses: actions/upload-artifact@v4
+        with:
+          name: helicopter-facility-short
+          path: out/helicopter-facility-short.mp4
+          retention-days: 7
+          
