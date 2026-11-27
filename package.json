@@ -1,0 +1,39 @@
+{
+  "name": "helicopter-facility-short",
+  "version": "1.0.0",
+  "private": true,
+  "description": "3D YouTube Short: build a private helicopter landing facility (Remotion + Three.js)",
+  "scripts": {
+    "start": "remotion studio src/index.ts",
+    "render": "remotion render src/index.ts HelicopterFacility out/helicopter-facility.mp4",
+    "render:preview": "remotion render src/index.ts HelicopterFacility out/preview.mp4 --scale=0.5 --crf=26",
+    "benchmark": "bash scripts/benchmark.sh",
+    "still": "remotion still src/index.ts HelicopterFacility out/frame.png --frame=255",
+    "analyze": "tsx scripts/analyze-audio.ts",
+    "audio": "tsx scripts/gen-audio.ts",
+    "check:syntax": "node scripts/check-syntax.mjs",
+    "check:assets": "node scripts/check-assets.mjs",
+    "check:timeline": "tsx scripts/check-timeline.ts",
+    "check:framing": "tsx scripts/check-framing.ts",
+    "check:audio": "tsx scripts/check-audio.ts",
+    "check:budget": "tsx scripts/check-budget.ts",
+    "typecheck": "tsc --noEmit",
+    "check": "npm run check:syntax && npm run check:assets && npm run check:timeline && npm run check:framing && npm run check:budget && npm run check:audio"
+  },
+  "dependencies": {
+    "@react-three/fiber": "8.17.10",
+    "@remotion/cli": "4.0.250",
+    "@remotion/three": "4.0.250",
+    "react": "18.3.1",
+    "react-dom": "18.3.1",
+    "remotion": "4.0.250",
+    "three": "0.169.0"
+  },
+  "devDependencies": {
+    "@types/node": "20.14.10",
+    "@types/react": "18.3.12",
+    "@types/three": "0.169.0",
+    "tsx": "4.19.2",
+    "typescript": "5.6.3"
+  }
+}

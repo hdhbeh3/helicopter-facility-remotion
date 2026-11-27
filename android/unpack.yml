@@ -1,0 +1,21 @@
+# Paste this into a new file named  .github/workflows/unpack.yml  (GitHub web editor works on Android).
+# It unzips the project ZIP that you uploaded to the repo root and commits the files.
+# (GitHub does not let this bot write .github/workflows, so render.yml is pasted by hand afterwards.)
+name: Unpack project ZIP
+on: workflow_dispatch
+permissions:
+  contents: write
+jobs:
+  unpack:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Unzip and commit
+        run: |
+          Z=$(ls *.zip | head -1)
+          mkdir /tmp/u && unzip -q "$Z" -d /tmp/u
+          SRC=$(find /tmp/u -maxdepth 2 -name package.json -printf '%h\n' | head -1)
+          rsync -a --exclude '.github' "$SRC"/ ./
+          rm -f "$Z"
+          git config user.name "unpack-bot"; git config user.email "bot@users.noreply.github.com"
+          git add -A && git commit -m "Unpack project" && git push
