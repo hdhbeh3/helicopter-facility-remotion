@@ -1,0 +1,91 @@
+
+name: Merge Existing Helicopter Chunks
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  merge:
+    name: Merge Existing Chunks and Audio
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install FFmpeg
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+
+      - name: Download Existing 8 Chunks
+        uses: actions/download-artifact@v4
+        with:
+          pattern: chunk-*
+          path: chunks
+          merge-multiple: false
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository }}
+          run-id: 45980056978
+
+      - name: Verify Chunks
+        run: |
+          find chunks -type f -name '*.mp4' | sort
+          COUNT=$(find chunks -type f -name '*.mp4' | wc -l)
+          if [ "$COUNT" -ne 8 ]; then
+            echo "Expected 8 chunks, found $COUNT"
+            exit 1
+          fi
+
+      - name: Merge Video and Original Audio
+        run: |
+          mkdir -p out
+
+          find chunks -type f -name '*.mp4' | sort > chunk-files.txt
+
+          while IFS= read -r file; do
+            printf "file '%s'\n" "$file"
+          done < chunk-files.txt > concat-list.txt
+
+          TOTAL_FRAMES=$(node -e "const d=require('./src/audioTimeline.json').duration; console.log(Math.ceil((d+0.4)*30))")
+
+          ffmpeg -y \
+            -f concat -safe 0 -i concat-list.txt \
+            -i public/voiceover.mp3 \
+            -i public/audio/music.wav \
+            -i public/audio/sfx.wav \
+            -filter_complex \
+            "[1:a][2:a][3:a]amix=inputs=3:duration=longest:dropout_transition=0[a]" \
+            -map 0:v:0 \
+            -map "[a]" \
+            -frames:v "$TOTAL_FRAMES" \
+            -c:v libx264 \
+            -preset medium \
+            -crf 18 \
+            -pix_fmt yuv420p \
+            -c:a aac \
+            -b:a 192k \
+            -shortest \
+            -movflags +faststart \
+            out/helicopter-facility-short.mp4
+
+      - name: Verify Final Video
+        run: |
+          ffprobe -v error \
+            -show_entries format=duration,size \
+            -show_entries stream=codec_name,width,height,r_frame_rate \
+            -of default=noprint_wrappers=1 \
+            out/helicopter-facility-short.mp4
+
+      - name: Upload Final Video
+        uses: actions/upload-artifact@v4
+        with:
+          name: helicopter-facility-short
+          path: out/helicopter-facility-short.mp4
+          retention-days: 7
+          
