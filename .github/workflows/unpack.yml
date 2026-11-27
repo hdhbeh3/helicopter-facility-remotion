@@ -1,0 +1,94 @@
+
+name: Unpack project ZIP
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  unpack:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+
+      - name: Install unzip and rsync
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y unzip rsync
+
+      - name: Extract optimized project ZIP
+        run: |
+          set -euo pipefail
+
+          echo "Searching for ZIP in repository root..."
+
+          ZIP_FILE=$(find . -maxdepth 1 -type f -iname '*.zip' -print -quit)
+
+          if [ -z "$ZIP_FILE" ]; then
+            echo "ERROR: No ZIP file found in repository root."
+            exit 1
+          fi
+
+          echo "Found ZIP: $ZIP_FILE"
+
+          mkdir -p /tmp/project-unzip
+
+          unzip -q "$ZIP_FILE" -d /tmp/project-unzip
+
+          echo "Searching for project package.json..."
+
+          SOURCE_DIR=$(find /tmp/project-unzip \
+            -maxdepth 4 \
+            -type f \
+            -name package.json \
+            -printf '%h\n' | head -1)
+
+          if [ -z "$SOURCE_DIR" ]; then
+            echo "ERROR: package.json not found inside ZIP."
+            find /tmp/project-unzip -maxdepth 3 -type f | head -50
+            exit 1
+          fi
+
+          echo "Project found at: $SOURCE_DIR"
+
+          rsync -a --exclude='.github' "$SOURCE_DIR"/ ./
+
+          echo "Checking extracted project..."
+
+          test -f package.json
+          test -f src/index.ts
+
+          echo "Project files extracted successfully."
+
+          rm -f "$ZIP_FILE"
+
+      - name: Commit extracted project
+        run: |
+          set -euo pipefail
+
+          git config user.name "unpack-bot"
+          git config user.email "bot@users.noreply.github.com"
+
+          git add -A
+
+          if git diff --cached --quiet; then
+            echo "No changes to commit."
+          else
+            git commit -m "Unpack optimized helicopter project"
+            git push
+          fi
+
+      - name: Final verification
+        run: |
+          echo "Project structure:"
+          ls -la
+          echo "Package:"
+          cat package.json
+          
